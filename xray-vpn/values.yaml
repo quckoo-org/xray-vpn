@@ -1,0 +1,104 @@
+# Количество экземпляров каждого деплоймента
+replicaCount: 1
+
+# Docker-образ
+image:
+  repository: ghcr.io/mhsanaei/3x-ui
+  pullPolicy: IfNotPresent
+  # default: latest
+  tag: ""
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+# Настройки веб-интерфейса
+credentials:
+  # Добавить/обновить пользователя (выполнение скрипта)
+  execute: true
+  # Перезатирать
+  overwrite: true
+  # Логин для входа в веб-интерфейс
+  adminUsername: "admin"
+  # Пароль для входа в веб-интерфейс
+  adminPassword: "password"
+
+# Создавать ли Issuer для cert-manager
+issuer:
+  create: true
+  email: "test@test.com"
+  server: "https://acme-v02.api.letsencrypt.org/directory"
+  className: "nginx"
+
+# На какие ноды устанавливаем сервис
+targetNodes:
+  nodes:
+    - hostname: node-1
+      service:
+        - serviceType: web
+          servicePort: 2053
+          type: ClusterIP
+          containerPort: 2053
+          portName: web
+          protocol: TCP
+          # Настройка ресурсов default {}
+          resources:
+            requests:
+              cpu: 300m
+              memory: 512Mi
+            limits:
+              cpu: 500m
+              memory: 1Gi
+          # Настройка проб default {}
+          livenessProbe: {}
+            # httpGet:
+            #   path: /
+            #   port: web
+            # initialDelaySeconds: 60
+            # periodSeconds: 10
+            # timeoutSeconds: 5
+            # failureThreshold: 10
+          readinessProbe: {}
+            # httpGet:
+            #   path: /
+            #   port: web
+            # initialDelaySeconds: 20
+            # periodSeconds: 5
+            # timeoutSeconds: 3
+            # failureThreshold: 10
+        - serviceType: access
+          type: NodePort
+          ports:
+          - name: vless
+            nodePort: 31001
+            port: 31001
+            protocol: TCP
+            targetPort: 31001
+          # - name: vmess
+          #   nodePort: 31002
+          #   port: 31002
+          #   protocol: TCP
+          #   targetPort: 31002
+          # - name: ss
+          #   nodePort: 31003
+          #   port: 31003
+          #   protocol: TCP
+          #   targetPort: 31003
+          # - name: trojan
+          #   nodePort: 31004
+          #   port: 31004
+          #   protocol: TCP
+          #   targetPort: 31004
+      nodeSelector: 
+        {}
+        # kubernetes.io/os: linux
+        # kubernetes.io/hostname: node-1
+      tolerations: 
+        []
+        # - key: node-role.kubernetes.io/system
+        #   operator: Exists
+        #   effect: NoSchedule
+      ingress:
+        enabled: true
+        hosts:
+          - host: vpn.yourdomain.com

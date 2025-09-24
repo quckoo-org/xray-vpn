@@ -1,0 +1,107 @@
+{{- range $i, $node := .Values.targetNodes.nodes }}
+{{- $services := (default (list) $node.service) }}
+{{- $web := dict }}{{- range $s := $services }}{{- if eq $s.serviceType "web" }}{{- $web = $s }}{{- end }}{{- end }}
+{{- if not $web.serviceType }}{{- fail (printf "node[%d] hostname=%s: serviceType 'web' is required" $i ($node.hostname | default "<nil>")) }}{{- end }}
+
+{{- $hn := (($node.hostname | required (printf "node[%d]: hostname required" $i)) | lower | replace "_" "-" | replace "." "-" | trunc 63 | trimSuffix "-") }}
+{{- $fullname := (printf "%s-%s" (include "xray-vpn.fullname" $) $hn) | trunc 63 | trimSuffix "-" }}
+
+{{- $creds := dict -}}
+{{- with $.Values.credentials }}{{- $creds = . }}{{- end }}
+{{- $executeStr := toString (default false $creds.execute) -}}
+{{- $overwrite := (default false $creds.overwrite) -}}
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $fullname }}
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    app.kubernetes.io/instance: {{ $.Release.Name }}
+spec:
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
+  replicas: 1
+  selector:
+    matchLabels:
+      app: {{ include "xray-vpn.name" $ }}-{{ $hn }}
+  template:
+    metadata:
+      annotations:
+        checksum/creds-secret: {{ include (print $.Template.BasePath "/secret.yaml") $ | sha256sum }}
+        checksum/creds-values: {{ toYaml (default (dict) $.Values.credentials) | sha256sum }}
+      labels:
+        app: {{ include "xray-vpn.name" $ }}-{{ $hn }}
+    spec:
+      nodeSelector:
+        kubernetes.io/hostname: "{{ $node.hostname }}"
+      {{- with $node.nodeSelector }}
+{{ toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $node.tolerations }}
+      tolerations:
+{{ toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: {{ $.Chart.Name }}
+          image: "{{ $.Values.image.repository }}:{{ default "latest" $.Values.image.tag }}"
+          imagePullPolicy: {{ $.Values.image.pullPolicy }}
+          securityContext:
+            runAsUser: 0
+          {{- if eq $executeStr "true" }}
+          lifecycle:
+            postStart:
+              exec:
+                command: [ "sh", "-lc", "/usr/local/bin/change_user.sh" ]
+          {{- end }}
+          ports:
+          {{- range $s := $services }}
+            - name: {{ (default "http" $s.portName) | lower | replace "_" "-" | trunc 15 | trimSuffix "-" }}
+              containerPort: {{ default 80 $s.containerPort }}
+              protocol: {{ default "TCP" $s.protocol }}
+          {{- end }}
+          {{- with $web.livenessProbe }}
+          livenessProbe:
+{{ toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with $web.readinessProbe }}
+          readinessProbe:
+{{ toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with $web.resources }}
+          resources:
+{{ toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - name: {{ $fullname }}-storage
+              mountPath: /etc/x-ui
+            - name: {{ $fullname }}-creds
+              mountPath: /run/secrets/xui
+              readOnly: true
+            {{- if eq $executeStr "true" }}
+            - name: {{ $fullname }}-scripts
+              mountPath: /usr/local/bin/change_user.sh
+              subPath: change_user.sh
+              readOnly: true
+            {{- end }}
+      volumes:
+        - name: {{ $fullname }}-storage
+          persistentVolumeClaim:
+            claimName: {{ $fullname }}
+            readOnly: false
+        - name: {{ $fullname }}-creds
+          secret:
+            secretName: {{ include "xray-vpn.fullname" $ }}-credentials
+            optional: false
+        {{- if eq $executeStr "true" }}
+        - name: {{ $fullname }}-scripts
+          configMap:
+            name: {{ $fullname }}-scripts
+            defaultMode: 0755
+        {{- end }}
+---
+{{- end }}

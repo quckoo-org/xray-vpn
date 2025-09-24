@@ -1,0 +1,31 @@
+{{- range $i, $node := $.Values.targetNodes.nodes }}
+{{- $services := (default (list) $node.service) }}
+{{- $access := dict }}{{- range $s := $services }}{{- if eq $s.serviceType "access" }}{{- $access = $s }}{{- end }}{{- end }}
+{{- if not $access.serviceType }}{{- fail (printf "node[%d] hostname=%s: serviceType 'access' is required" $i ($node.hostname | default "<nil>")) }}{{- end }}
+{{- $hn := ($node.hostname | required (printf "node[%d]: hostname required" $i)) | lower | replace "_" "-" | replace "." "-" | trunc 63 | trimSuffix "-" }}
+{{- $ports := (default (list) $access.ports) }}
+{{- if not $ports }}{{- fail (printf "node[%d] %s: access.ports is required and must be non-empty" $i $node.hostname) }}{{- end }}
+
+apiVersion: v1
+kind: Service
+metadata:
+  namespace: {{ $.Release.Namespace }}
+  name: {{ include "xray-vpn.fullname" $ }}-{{ $hn }}-access
+  labels:
+    app.kubernetes.io/instance: {{ $.Release.Name }}
+spec:
+  type: {{ default "NodePort" $access.type }}
+  selector:
+    app: {{ include "xray-vpn.name" $ }}-{{ $hn }}
+  ports:
+  {{- range $p := $ports }}
+    - name: {{ (default "port" $p.name) | lower | replace "_" "-" | trunc 15 | trimSuffix "-" }}
+      port: {{ required "access.ports[].port is required" $p.port }}
+      targetPort: {{ required "access.ports[].targetPort is required" $p.targetPort }}
+      protocol: {{ default "TCP" $p.protocol }}
+      {{- if eq (default "NodePort" $access.type) "NodePort" }}
+      nodePort: {{ required "access.ports[].nodePort is required for NodePort" $p.nodePort }}
+      {{- end }}
+---
+{{- end }}
+{{- end }}

@@ -1,0 +1,9 @@
+apiVersion: v2
+name: xray-vpn
+description: XRay VPN Helm Chart
+
+type: application
+
+version: 1.0.0
+
+appVersion: "1.0.0"

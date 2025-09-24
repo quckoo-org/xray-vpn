@@ -1,0 +1,45 @@
+{{- range $i, $node := .Values.targetNodes.nodes }}
+{{- $services := (default (list) $node.service) }}
+{{- $web := dict }}{{- range $s := $services }}{{- if eq $s.serviceType "web" }}{{- $web = $s }}{{- end }}{{- end }}
+{{- if not $web.serviceType }}{{- fail (printf "node[%d] hostname=%s: serviceType 'web' is required" $i ($node.hostname | default "<nil>")) }}{{- end }}
+{{- $hn := (($node.hostname | required (printf "node[%d]: hostname required" $i)) | lower | replace "_" "-" | replace "." "-" | trunc 63 | trimSuffix "-") }}
+{{- $fullname := (printf "%s-%s" (include "xray-vpn.fullname" $) $hn) | trunc 63 | trimSuffix "-" }}
+{{- $creds := dict -}}
+{{- with $.Values.credentials }}{{- $creds = . }}{{- end }}
+{{- $overwrite := (default false $creds.overwrite) -}}
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $fullname }}-scripts
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    app.kubernetes.io/instance: {{ $.Release.Name }}
+data:
+  change_user.sh: |
+    #!/bin/sh
+    set -eu
+    for i in $(seq 1 300); do
+      [ -f /etc/x-ui/x-ui.db ] && break
+      sleep 1
+    done
+    apk add --no-cache --virtual .xui-deps apache2-utils sqlite >/dev/null 2>&1 || true
+    USER_RAW="$(cat /run/secrets/xui/PANEL_USER)"
+    PASS_RAW="$(cat /run/secrets/xui/PANEL_PASS)"
+    OVERWRITE="{{ if $overwrite }}true{{ else }}false{{ end }}"
+    UQ="$(printf "%s" "$USER_RAW" | sed "s/'/''/g")"
+    H="$(htpasswd -nbBC 10 x "$PASS_RAW" | cut -d: -f2)"
+    HQ="$(printf "%s" "$H" | sed "s/'/''/g")"
+    EXISTS="$(sqlite3 /etc/x-ui/x-ui.db "SELECT COUNT(*) FROM users WHERE username='${UQ}';" || echo 0)"
+    if [ "${EXISTS}" -gt 0 ]; then
+      if [ "${OVERWRITE}" = "true" ]; then
+        sqlite3 /etc/x-ui/x-ui.db "UPDATE users SET password='${HQ}' WHERE username='${UQ}';" >/dev/null 2>&1 || true
+      fi
+    else
+      sqlite3 /etc/x-ui/x-ui.db "INSERT INTO users(username,password) VALUES('${UQ}','${HQ}');" >/dev/null 2>&1 || true
+    fi
+    apk del .xui-deps >/dev/null 2>&1 || true
+    USER_RAW= PASS_RAW= OVERWRITE= UQ= H= HQ=
+---
+{{- end }}

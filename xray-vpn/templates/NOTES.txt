@@ -1,0 +1,18 @@
+XRay VPN Helm Chart
+
+Install:
+
+В отдельный namespace
+  helm upgrade --install xray-vpn ./xray-vpn -n xray-vpn --create-namespace
+
+Полезные команды:
+
+# Подключиться в Pod и посмотреть пользователей БД
+POD=$(kubectl -n xray-vpn get pod -l app=xray-vpn-quckoo-node-1 -o jsonpath='{.items[0].metadata.name}')
+kubectl -n xray-vpn exec -it "$POD" -- sh -lc '
+  apk add --no-cache sqlite >/dev/null 2>&1 || true
+  sqlite3 /etc/x-ui/x-ui.db "SELECT * FROM users;"
+'
+
+Uninstall:
+  helm uninstall xray-vpn -n xray-vpn

@@ -1,0 +1,59 @@
+{{- $iss := .Values.issuer | default dict }}
+{{- range $i, $node := .Values.targetNodes.nodes }}
+{{- $services := ($node.service | default list) }}
+{{- $web := dict }}{{- range $s := $services }}{{- if eq $s.serviceType "web" }}{{- $web = $s }}{{- end }}{{- end }}
+{{- if not $web.serviceType }}{{- fail (printf "node[%d] hostname=%s: serviceType 'web' is required" $i $node.hostname) }}{{- end }}
+{{- $ing := ($node.ingress | default dict) }}
+{{- $hosts := ($ing.hosts | default list) }}
+
+{{- if and ($ing.enabled | default false) (not $hosts) }}
+{{- fail (printf "node[%d] %s: ingress.enabled=true требует ingress.hosts" $i $node.hostname) }}
+{{- end }}
+
+{{- if and ($ing.enabled | default false) $hosts }}
+{{- $hn := ($node.hostname | required (printf "node[%d]: hostname required" $i)) | lower | replace "_" "-" | replace "." "-" | trunc 63 | trimSuffix "-" }}
+
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "xray-vpn.fullname" $ }}-{{ $hn }}-ingress
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    app.kubernetes.io/instance: {{ $.Release.Name }}
+  annotations:
+    {{- if ($iss.create | default false) }}
+    cert-manager.io/issuer: {{ (include "xray-vpn.fullname" $) | printf "%s-issuer" | quote }}
+    {{- end }}
+    {{- with ($ing.annotations | default dict) }}
+{{ toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  ingressClassName: {{ $ing.className | default "nginx" | quote }}
+  tls:
+    - hosts:
+        {{- range $h := $hosts }}
+        - {{ $h.host | required (printf "ingress.hosts[].host required for %s" $hn) | quote }}
+        {{- end }}
+      secretName: {{ include "xray-vpn.fullname" $ }}-{{ $hn }}-tls
+  rules:
+    {{- range $h := $hosts }}
+    - host: {{ $h.host | quote }}
+      http:
+        paths:
+          {{- $paths := ($h.paths | default (list (dict "path" "/" "pathType" "Prefix"))) }}
+          {{- range $p := $paths }}
+          - path: {{ $p.path | default "/" | quote }}
+            pathType: {{ $p.pathType | default "Prefix" }}
+            backend:
+              service:
+                name: {{ include "xray-vpn.fullname" $ }}-{{ $hn }}-web
+                {{- if $web.portName }}
+                port: { name: {{ $web.portName | quote }} }
+                {{- else }}
+                port: { number: {{ default 2053 $web.servicePort }} }
+                {{- end }}
+          {{- end }}
+    {{- end }}
+---
+{{- end }}
+{{- end }}

@@ -1,0 +1,22 @@
+{{- $iss := .Values.issuer | default dict }}
+{{- if ($iss.create | default false) }}
+{{- $email := required "issuer.email is required when issuer.create=true" $iss.email }}
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: {{ include "xray-vpn.fullname" . }}-issuer
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    app.kubernetes.io/instance: {{ $.Release.Name }}
+spec:
+  acme:
+    server: {{ $iss.server | default "https://acme-v02.api.letsencrypt.org/directory" | quote }}
+    email: {{ $email | quote }}
+    privateKeySecretRef:
+      name: {{ include "xray-vpn.fullname" . }}-issuer
+    solvers:
+      - http01:
+          ingress:
+            class: {{ $iss.className | default "nginx" | quote }}
+---
+{{- end }}

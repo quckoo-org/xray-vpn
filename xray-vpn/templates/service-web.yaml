@@ -1,0 +1,24 @@
+{{- range $i, $node := $.Values.targetNodes.nodes }}
+{{- $services := (default (list) $node.service) }}
+{{- $web := dict }}{{- range $svc := $services }}{{- if eq $svc.serviceType "web" }}{{- $web = $svc }}{{- end }}{{- end }}
+{{- if not $web.serviceType }}{{- fail (printf "node[%d] hostname=%s: serviceType 'web' is required" $i ($node.hostname | default "<nil>")) }}{{- end }}
+{{- $hn := ($node.hostname | required (printf "node[%d]: hostname required" $i)) | lower | replace "_" "-" | replace "." "-" | trunc 63 | trimSuffix "-" }}
+
+apiVersion: v1
+kind: Service
+metadata:
+  namespace: {{ $.Release.Namespace }}
+  name: {{ include "xray-vpn.fullname" $ }}-{{ $hn }}-web
+  labels:
+    app.kubernetes.io/instance: {{ $.Release.Name }}
+spec:
+  type: {{ default "ClusterIP" $web.type }}
+  selector:
+    app: {{ include "xray-vpn.name" $ }}-{{ $hn }}
+  ports:
+    - name: {{ (default "http" $web.portName) | lower | replace "_" "-" | trunc 15 | trimSuffix "-" }}
+      port: {{ default 80 $web.servicePort }}
+      targetPort: {{ default 80 $web.containerPort }}
+      protocol: {{ default "TCP" $web.protocol }}
+---
+{{- end }}
